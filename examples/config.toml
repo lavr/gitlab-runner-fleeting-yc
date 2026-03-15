@@ -1,0 +1,34 @@
+concurrent = 10
+
+[[runners]]
+  name     = "yc-docker-autoscaler"
+  url      = "https://gitlab.example.com/"
+  token    = "glrt-xxxxxxxxxxxx"
+  executor = "docker-autoscaler"
+
+  [runners.docker]
+    image       = "alpine:latest"
+    pull_policy = ["if-not-present"]
+
+  [runners.autoscaler]
+    plugin                = "fleeting-plugin-yandexcloud"
+    capacity_per_instance = 1
+    max_use_count         = 10
+    max_instances         = 5
+
+    instance_ready_command = "cloud-init status --wait || test $? -eq 2"
+
+    [runners.autoscaler.plugin_config]
+      folder_id         = "b1gxxxxxxxxxxxxxxxxx"
+      instance_group_id = "cl1xxxxxxxxxxxxxxxxx"
+      # key_file = "/etc/gitlab-runner/yc-key.json"  # if not set — metadata auto-detect
+      ssh_user          = "ubuntu"
+
+    [runners.autoscaler.connector_config]
+      username          = "ubuntu"
+      use_external_addr = true
+      # key_path = "/etc/gitlab-runner/runner-ssh-key"
+
+    [[runners.autoscaler.policy]]
+      idle_count = 1
+      idle_time  = "20m"

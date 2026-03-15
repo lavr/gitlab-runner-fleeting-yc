@@ -1,0 +1,8 @@
+docs/
+
+# ralphex progress logs
+.ralphex/progress/
+
+# Binary
+fleeting-plugin-yandexcloud
+dist/

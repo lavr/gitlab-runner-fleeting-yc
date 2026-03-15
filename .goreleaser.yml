@@ -1,0 +1,23 @@
+project_name: fleeting-plugin-yandexcloud
+
+builds:
+  - main: .
+    binary: fleeting-plugin-yandexcloud
+    goos: [linux]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.revision={{.ShortCommit}} -X main.reference={{.Tag}} -X main.builtAt={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: lavr
+    name: gitlab-runner-fleeting-yc
