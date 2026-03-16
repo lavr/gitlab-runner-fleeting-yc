@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"math"
 	"os"
@@ -1328,6 +1331,219 @@ scale_policy:
 	}
 	if !strings.Contains(err.Error(), "rollback delete failed") {
 		t.Errorf("expected rollback error in message, got: %v", err)
+	}
+}
+
+// newTestGroupWithTemplate creates a test instance group with an InstanceTemplate
+// containing the given metadata. Useful for SSH key injection tests.
+func newTestGroupWithTemplate(targetSize int64, metadata map[string]string) *ig.InstanceGroup {
+	group := newTestGroup(targetSize)
+	group.InstanceTemplate = &ig.InstanceTemplate{
+		Metadata: metadata,
+	}
+	return group
+}
+
+func TestGenerateED25519Key(t *testing.T) {
+	privPEM, authorizedKey, err := generateED25519Key()
+	if err != nil {
+		t.Fatalf("generateED25519Key failed: %v", err)
+	}
+
+	// Verify PEM is parseable.
+	block, _ := pem.Decode(privPEM)
+	if block == nil {
+		t.Fatal("failed to decode PEM block from private key")
+	}
+	if block.Type != "PRIVATE KEY" {
+		t.Errorf("expected PEM type 'PRIVATE KEY', got %q", block.Type)
+	}
+
+	// Verify the private key is a valid PKCS8 key.
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		t.Fatalf("failed to parse PKCS8 private key: %v", err)
+	}
+	if _, ok := key.(ed25519.PrivateKey); !ok {
+		t.Errorf("expected ed25519.PrivateKey, got %T", key)
+	}
+
+	// Verify public key format.
+	if !strings.HasPrefix(authorizedKey, "ssh-ed25519 ") {
+		t.Errorf("expected authorized key to start with 'ssh-ed25519 ', got %q", authorizedKey)
+	}
+}
+
+func TestInit_GenerateSSHKey_InjectsMetadata(t *testing.T) {
+	group := newTestGroupWithTemplate(2, map[string]string{
+		"existing-key": "existing-value",
+	})
+	mock := &mockClient{group: group}
+
+	cfg := defaultConfig()
+	cfg.GenerateSSHKey = true
+	g := &InstanceGroup{
+		Config: cfg,
+		client: mock,
+	}
+
+	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// Verify Update was called with ssh-keys in metadata.
+	if mock.lastUpdateReq == nil {
+		t.Fatal("expected Update to be called for SSH key injection")
+	}
+	meta := mock.lastUpdateReq.GetInstanceTemplate().GetMetadata()
+	if meta == nil {
+		t.Fatal("expected metadata in update request")
+	}
+	sshKeys, ok := meta["ssh-keys"]
+	if !ok || sshKeys == "" {
+		t.Fatal("expected ssh-keys in metadata")
+	}
+	if !strings.HasPrefix(sshKeys, "ubuntu:ssh-ed25519 ") {
+		t.Errorf("expected ssh-keys to start with 'ubuntu:ssh-ed25519 ', got %q", sshKeys)
+	}
+	// Verify existing metadata is preserved.
+	if meta["existing-key"] != "existing-value" {
+		t.Errorf("expected existing metadata preserved, got %q", meta["existing-key"])
+	}
+}
+
+func TestInit_GenerateSSHKey_AppendsToExistingKeys(t *testing.T) {
+	existingSSHKeys := "otheruser:ssh-rsa AAAA..."
+	group := newTestGroupWithTemplate(2, map[string]string{
+		"ssh-keys": existingSSHKeys,
+	})
+	mock := &mockClient{group: group}
+
+	cfg := defaultConfig()
+	cfg.GenerateSSHKey = true
+	g := &InstanceGroup{
+		Config: cfg,
+		client: mock,
+	}
+
+	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if mock.lastUpdateReq == nil {
+		t.Fatal("expected Update to be called")
+	}
+	sshKeys := mock.lastUpdateReq.GetInstanceTemplate().GetMetadata()["ssh-keys"]
+
+	// Existing keys should be preserved at the beginning.
+	if !strings.HasPrefix(sshKeys, existingSSHKeys+"\n") {
+		t.Errorf("expected existing ssh-keys to be preserved, got %q", sshKeys)
+	}
+	// New key should be appended.
+	if !strings.Contains(sshKeys, "ubuntu:ssh-ed25519 ") {
+		t.Errorf("expected new key to be appended, got %q", sshKeys)
+	}
+}
+
+func TestInit_GenerateSSHKey_UpdateError(t *testing.T) {
+	group := newTestGroupWithTemplate(2, nil)
+	mock := &mockClient{
+		group:     group,
+		updateErr: fmt.Errorf("metadata update failed"),
+	}
+
+	cfg := defaultConfig()
+	cfg.GenerateSSHKey = true
+	g := &InstanceGroup{
+		Config: cfg,
+		client: mock,
+	}
+
+	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
+	if err == nil {
+		t.Fatal("expected error when Update fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "metadata update failed") {
+		t.Errorf("expected metadata update error, got: %v", err)
+	}
+}
+
+func TestInit_GenerateSSHKey_Disabled(t *testing.T) {
+	group := newTestGroupWithTemplate(2, nil)
+	mock := &mockClient{group: group}
+
+	cfg := defaultConfig()
+	cfg.GenerateSSHKey = false
+	g := &InstanceGroup{
+		Config: cfg,
+		client: mock,
+	}
+
+	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	if mock.lastUpdateReq != nil {
+		t.Error("expected Update NOT to be called when GenerateSSHKey is false")
+	}
+	if g.sshPrivateKey != nil {
+		t.Error("expected sshPrivateKey to be nil when GenerateSSHKey is false")
+	}
+}
+
+func TestConnectInfo_WithGeneratedKey(t *testing.T) {
+	mock := &mockClient{
+		instances: []*ig.ManagedInstance{
+			newTestInstance("inst-1", ig.ManagedInstance_RUNNING_ACTUAL, "10.0.0.1", "1.2.3.4"),
+		},
+	}
+	g := &InstanceGroup{
+		Config:       defaultConfig(),
+		client:       mock,
+		log:          hclog.NewNullLogger(),
+		sshPrivateKey: []byte("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"),
+		sshPublicKey:  "ssh-ed25519 AAAA...",
+	}
+
+	info, err := g.ConnectInfo(context.Background(), "inst-1")
+	if err != nil {
+		t.Fatalf("ConnectInfo failed: %v", err)
+	}
+	if info.ConnectorConfig.Key == nil {
+		t.Fatal("expected Key to be set in ConnectInfo")
+	}
+	if string(info.ConnectorConfig.Key) != string(g.sshPrivateKey) {
+		t.Errorf("expected Key to match sshPrivateKey")
+	}
+	if !info.ConnectorConfig.UseStaticCredentials {
+		t.Error("expected UseStaticCredentials to be true")
+	}
+}
+
+func TestConnectInfo_WithoutGeneratedKey(t *testing.T) {
+	mock := &mockClient{
+		instances: []*ig.ManagedInstance{
+			newTestInstance("inst-1", ig.ManagedInstance_RUNNING_ACTUAL, "10.0.0.1", "1.2.3.4"),
+		},
+	}
+	g := &InstanceGroup{
+		Config: defaultConfig(),
+		client: mock,
+		log:    hclog.NewNullLogger(),
+		// sshPrivateKey is nil — feature not enabled.
+	}
+
+	info, err := g.ConnectInfo(context.Background(), "inst-1")
+	if err != nil {
+		t.Fatalf("ConnectInfo failed: %v", err)
+	}
+	if info.ConnectorConfig.Key != nil {
+		t.Errorf("expected Key to be nil when SSH key generation is off, got %v", info.ConnectorConfig.Key)
+	}
+	if info.ConnectorConfig.UseStaticCredentials {
+		t.Error("expected UseStaticCredentials to be false when SSH key generation is off")
 	}
 }
 

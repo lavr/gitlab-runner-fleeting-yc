@@ -105,15 +105,15 @@ Already a transitive dependency; needs to be promoted to direct.
 
 ### Iteration 2: Tests
 
-- [ ] `plugin_test.go` — add `newTestGroupWithTemplate(targetSize, metadata)` helper
-- [ ] `plugin_test.go` — add `TestGenerateED25519Key` (PEM parseable, key type `ssh-ed25519`)
-- [ ] `plugin_test.go` — add `TestInit_GenerateSSHKey_InjectsMetadata` (Update called, existing metadata preserved)
-- [ ] `plugin_test.go` — add `TestInit_GenerateSSHKey_AppendsToExistingKeys` (multi-key `ssh-keys`)
-- [ ] `plugin_test.go` — add `TestInit_GenerateSSHKey_UpdateError` (Init fails on Update error)
-- [ ] `plugin_test.go` — add `TestInit_GenerateSSHKey_Disabled` (no Update call when off)
-- [ ] `plugin_test.go` — add `TestConnectInfo_WithGeneratedKey` (Key + UseStaticCredentials set)
-- [ ] `plugin_test.go` — add `TestConnectInfo_WithoutGeneratedKey` (Key stays nil)
-- [ ] Verify: `go test ./... -v -timeout 60s` — all tests pass
+- [x] `plugin_test.go` — add `newTestGroupWithTemplate(targetSize, metadata)` helper
+- [x] `plugin_test.go` — add `TestGenerateED25519Key` (PEM parseable, key type `ssh-ed25519`)
+- [x] `plugin_test.go` — add `TestInit_GenerateSSHKey_InjectsMetadata` (Update called, existing metadata preserved)
+- [x] `plugin_test.go` — add `TestInit_GenerateSSHKey_AppendsToExistingKeys` (multi-key `ssh-keys`)
+- [x] `plugin_test.go` — add `TestInit_GenerateSSHKey_UpdateError` (Init fails on Update error)
+- [x] `plugin_test.go` — add `TestInit_GenerateSSHKey_Disabled` (no Update call when off)
+- [x] `plugin_test.go` — add `TestConnectInfo_WithGeneratedKey` (Key + UseStaticCredentials set)
+- [x] `plugin_test.go` — add `TestConnectInfo_WithoutGeneratedKey` (Key stays nil)
+- [x] Verify: `go test ./... -v -timeout 60s` — all tests pass
 
 ### Iteration 3: Documentation and cleanup
 
