@@ -24,6 +24,17 @@ concurrent = 10
       # key_file = "/etc/gitlab-runner/yc-key.json"  # if not set — metadata auto-detect
       ssh_user          = "ubuntu"
 
+    # --- Alternative: auto-create instance group from YAML template ---
+    # Instead of instance_group_id, you can point the plugin at a YAML template.
+    # The plugin will create the group on Init() and optionally delete it on Shutdown().
+    #
+    # [runners.autoscaler.plugin_config]
+    #   folder_id          = "b1gxxxxxxxxxxxxxxxxx"
+    #   template_file      = "/etc/gitlab-runner/instance-group-template.yaml"
+    #   group_name         = "fleeting-plugin-yandexcloud"  # default; used for idempotency
+    #   delete_on_shutdown = true
+    #   ssh_user           = "ubuntu"
+
     [runners.autoscaler.connector_config]
       username          = "ubuntu"
       use_external_addr = true

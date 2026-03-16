@@ -14,7 +14,7 @@ This plugin implements the `provider.InstanceGroup` interface from the [Fleeting
 
 ## Prerequisites
 
-- A Yandex Cloud Instance Group with a **FIXED** scale policy (Fleeting manages the size itself)
+- A Yandex Cloud Instance Group with a **FIXED** scale policy (Fleeting manages the size itself), **or** a YAML template file for auto-creation (see [Auto-Create Instance Group](#auto-create-instance-group))
 - Instance template: Ubuntu 22.04 with Docker installed, user `ubuntu` in the `docker` group
 - SSH public key of the runner manager must be set in the instance template metadata
 - A Service Account with the required IAM permissions (see below)
@@ -27,6 +27,11 @@ The Service Account used by the plugin requires the following minimum permission
 - `compute.instanceGroups.update` — change target size (scale up)
 - `compute.instanceGroups.delete` — delete specific instances (scale down via `DeleteInstances`)
 - `compute.instances.get` — read instance details
+
+When using `template_file` mode (auto-create), the following additional permissions are required:
+
+- `compute.instanceGroups.create` — create instance groups from YAML templates
+- `compute.instanceGroups.list` — list instance groups (for idempotency lookups)
 
 ## Installation
 
@@ -70,9 +75,14 @@ All fields are set under `[runners.autoscaler.plugin_config]` in `config.toml`.
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `folder_id` | string | **Yes** | — | Yandex Cloud folder ID |
-| `instance_group_id` | string | **Yes** | — | Instance Group ID to manage |
+| `instance_group_id` | string | **Yes**\* | — | Instance Group ID to manage |
+| `template_file` | string | **Yes**\* | — | Path to YAML template for auto-creating an instance group |
+| `delete_on_shutdown` | bool | No | `false` | Delete the auto-created group when the plugin shuts down |
+| `group_name` | string | No | `fleeting-plugin-yandexcloud` | Name used to find or create the instance group (for idempotency) |
 | `key_file` | string | No | — | Path to IAM JSON key file. If empty, uses metadata service |
 | `ssh_user` | string | No | `ubuntu` | Username for SSH connections |
+
+\* Exactly one of `instance_group_id` or `template_file` must be provided. They are mutually exclusive.
 
 ### Authentication
 
@@ -160,6 +170,34 @@ yc compute instance-group create \
 ```
 
 Start with `--fixed-scale-size 0` — Fleeting will manage the size.
+
+## Auto-Create Instance Group
+
+Instead of creating an instance group manually and providing its ID, you can supply a YAML template file. The plugin will create the group automatically during `Init()`.
+
+### How it works
+
+1. On startup, the plugin searches for an existing group by `group_name` and the label `fleeting-managed-by=fleeting-plugin-yandexcloud`.
+2. If a matching active group is found, it is reused (idempotent restart). If a managed group is found in `STOPPED` or `PAUSED` state, the plugin returns an error — delete or restore the group before restarting.
+3. If no matching group exists, the plugin reads the YAML template, injects the managed-by label, and calls the YC `CreateFromYaml` API. If post-creation validation fails (e.g. the template uses auto-scale instead of fixed-scale), the plugin rolls back by deleting the newly created group.
+4. On shutdown, if `delete_on_shutdown` is `true` and the group was created by the plugin, it is deleted (with a 5-minute timeout to prevent indefinite blocking).
+
+### Example config
+
+```toml
+[runners.autoscaler.plugin_config]
+  folder_id          = "b1gxxxxxxxxxxxxxxxxx"
+  template_file      = "/etc/gitlab-runner/instance-group-template.yaml"
+  group_name         = "my-runners"         # optional, default: "fleeting-plugin-yandexcloud"
+  delete_on_shutdown = true                  # optional, default: false
+  ssh_user           = "ubuntu"
+```
+
+An example YAML template is provided in [`examples/instance-group-template.yaml`](examples/instance-group-template.yaml). The format is the same as `yc compute instance-group create --file=spec.yaml`.
+
+### Idempotency
+
+If the plugin restarts, it will find the previously created group by name and label instead of creating a duplicate. If multiple groups match, the plugin returns an error and asks you to specify `instance_group_id` explicitly.
 
 ## Troubleshooting
 
