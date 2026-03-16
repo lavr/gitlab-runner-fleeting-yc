@@ -5,6 +5,7 @@ docs/
 
 # Binary
 fleeting-plugin-yandexcloud
+gitlab-runner-fleeting-yc
 dist/
 
 .claude/

@@ -684,6 +684,22 @@ func TestConfig_MissingFolderID(t *testing.T) {
 	}
 }
 
+func TestConfig_GenerateSSHKey_InvalidSSHUser(t *testing.T) {
+	for _, user := range []string{"user:name", "user\nname"} {
+		c := Config{FolderID: "f", InstanceGroupID: "test", GenerateSSHKey: true, SSHUser: user}
+		if err := c.validate(); err == nil {
+			t.Errorf("expected validation error for ssh_user %q, got nil", user)
+		}
+	}
+}
+
+func TestConfig_GenerateSSHKey_ValidSSHUser(t *testing.T) {
+	c := Config{FolderID: "f", InstanceGroupID: "test", GenerateSSHKey: true, SSHUser: "deploy"}
+	if err := c.validate(); err != nil {
+		t.Fatalf("expected no error for valid ssh_user, got: %v", err)
+	}
+}
+
 func TestHeartbeat_NoOp(t *testing.T) {
 	g := &InstanceGroup{}
 	if err := g.Heartbeat(context.Background(), "inst-1"); err != nil {
@@ -1398,6 +1414,7 @@ func TestInit_GenerateSSHKey_InjectsMetadata(t *testing.T) {
 	g := &InstanceGroup{
 		Config: cfg,
 		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
 	}
 
 	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
@@ -1447,6 +1464,7 @@ func TestInit_GenerateSSHKey_AppendsToExistingKeys(t *testing.T) {
 	g := &InstanceGroup{
 		Config: cfg,
 		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
 	}
 
 	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
@@ -1481,6 +1499,7 @@ func TestInit_GenerateSSHKey_UpdateError(t *testing.T) {
 	g := &InstanceGroup{
 		Config: cfg,
 		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
 	}
 
 	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
@@ -1525,6 +1544,7 @@ func TestInit_GenerateSSHKey_NilTemplate(t *testing.T) {
 	g := &InstanceGroup{
 		Config: cfg,
 		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
 	}
 
 	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
@@ -1555,6 +1575,7 @@ func TestInit_GenerateSSHKey_CustomSSHUser(t *testing.T) {
 	g := &InstanceGroup{
 		Config: cfg,
 		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
 	}
 
 	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
@@ -1583,6 +1604,7 @@ func TestInit_GenerateSSHKey_ReplacesExistingUserKey(t *testing.T) {
 	g := &InstanceGroup{
 		Config: cfg,
 		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
 	}
 
 	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
@@ -1612,9 +1634,9 @@ func TestConnectInfo_WithGeneratedKey(t *testing.T) {
 		},
 	}
 	g := &InstanceGroup{
-		Config:       defaultConfig(),
-		client:       mock,
-		log:          hclog.NewNullLogger(),
+		Config:        defaultConfig(),
+		client:        mock,
+		log:           hclog.NewNullLogger(),
 		sshPrivateKey: []byte("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"),
 		sshPublicKey:  "ssh-ed25519 AAAA...",
 	}
@@ -1676,6 +1698,114 @@ func TestConnectInfo_WithoutGeneratedKey(t *testing.T) {
 	}
 }
 
+func TestUpdate_RunningOutdated_WithSSHKey(t *testing.T) {
+	mock := &mockClient{
+		instances: []*ig.ManagedInstance{
+			newTestInstance("inst-actual", ig.ManagedInstance_RUNNING_ACTUAL, "10.0.0.1", "1.2.3.4"),
+			newTestInstance("inst-outdated", ig.ManagedInstance_RUNNING_OUTDATED, "10.0.0.2", "1.2.3.5"),
+		},
+	}
+	g := &InstanceGroup{
+		Config:        Config{FolderID: "f", InstanceGroupID: "test-group"},
+		client:        mock,
+		log:           hclog.NewNullLogger(),
+		sshPrivateKey: []byte("key-material"),
+	}
+
+	states := make(map[string]provider.State)
+	err := g.Update(context.Background(), func(instance string, state provider.State) {
+		states[instance] = state
+	})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if states["inst-actual"] != provider.StateRunning {
+		t.Errorf("RUNNING_ACTUAL: got %v, want %v", states["inst-actual"], provider.StateRunning)
+	}
+	if states["inst-outdated"] != provider.StateCreating {
+		t.Errorf("RUNNING_OUTDATED with SSH key: got %v, want %v", states["inst-outdated"], provider.StateCreating)
+	}
+}
+
+func TestUpdate_RunningOutdated_WithoutSSHKey(t *testing.T) {
+	mock := &mockClient{
+		instances: []*ig.ManagedInstance{
+			newTestInstance("inst-outdated", ig.ManagedInstance_RUNNING_OUTDATED, "10.0.0.1", "1.2.3.4"),
+		},
+	}
+	g := &InstanceGroup{
+		Config: Config{FolderID: "f", InstanceGroupID: "test-group"},
+		client: mock,
+		log:    hclog.NewNullLogger(),
+		// sshPrivateKey is nil — no SSH key generation.
+	}
+
+	var gotState provider.State
+	err := g.Update(context.Background(), func(_ string, state provider.State) {
+		gotState = state
+	})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if gotState != provider.StateRunning {
+		t.Errorf("RUNNING_OUTDATED without SSH key: got %v, want %v", gotState, provider.StateRunning)
+	}
+}
+
+func TestConnectInfo_WithGeneratedKey_OverridesUsername(t *testing.T) {
+	mock := &mockClient{
+		instances: []*ig.ManagedInstance{
+			newTestInstance("inst-1", ig.ManagedInstance_RUNNING_ACTUAL, "10.0.0.1", "1.2.3.4"),
+		},
+	}
+	g := &InstanceGroup{
+		Config:        defaultConfig(),
+		client:        mock,
+		log:           hclog.NewNullLogger(),
+		sshPrivateKey: []byte("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"),
+		sshPublicKey:  "ssh-ed25519 AAAA...",
+	}
+	g.SSHUser = "deploy"
+
+	info, err := g.ConnectInfo(context.Background(), "inst-1")
+	if err != nil {
+		t.Fatalf("ConnectInfo failed: %v", err)
+	}
+	if info.ConnectorConfig.Username != "deploy" {
+		t.Errorf("expected username %q, got %q", "deploy", info.ConnectorConfig.Username)
+	}
+}
+
+func TestConnectInfo_WithGeneratedKey_OverridesDivergentUsername(t *testing.T) {
+	mock := &mockClient{
+		instances: []*ig.ManagedInstance{
+			newTestInstance("inst-1", ig.ManagedInstance_RUNNING_ACTUAL, "10.0.0.1", "1.2.3.4"),
+		},
+	}
+	g := &InstanceGroup{
+		Config:        defaultConfig(),
+		client:        mock,
+		log:           hclog.NewNullLogger(),
+		sshPrivateKey: []byte("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"),
+		sshPublicKey:  "ssh-ed25519 AAAA...",
+		settings: provider.Settings{
+			ConnectorConfig: provider.ConnectorConfig{
+				Username: "wrong-user",
+			},
+		},
+	}
+	g.SSHUser = "deploy"
+
+	info, err := g.ConnectInfo(context.Background(), "inst-1")
+	if err != nil {
+		t.Fatalf("ConnectInfo failed: %v", err)
+	}
+	// The generated key is authorized for g.SSHUser, so username must be overridden.
+	if info.ConnectorConfig.Username != "deploy" {
+		t.Errorf("expected username %q (from SSHUser), got %q", "deploy", info.ConnectorConfig.Username)
+	}
+}
+
 func TestInjectLabels_ManagedByLabel(t *testing.T) {
 	input := `name: test
 `
@@ -1685,5 +1815,133 @@ func TestInjectLabels_ManagedByLabel(t *testing.T) {
 	}
 	if !strings.Contains(result, managedByLabel) || !strings.Contains(result, managedByValue) {
 		t.Errorf("expected managed-by label in result, got:\n%s", result)
+	}
+}
+
+func TestInit_GenerateSSHKey_RejectsOpportunisticReuse(t *testing.T) {
+	group := newTestGroupWithTemplate(2, map[string]string{})
+	group.DeployPolicy = &ig.DeployPolicy{
+		Strategy: ig.DeployPolicy_OPPORTUNISTIC,
+	}
+	mock := &mockClient{group: group}
+
+	cfg := defaultConfig()
+	cfg.GenerateSSHKey = true
+	// Simulate reuse: InstanceGroupID is pre-set (not created by template flow).
+	g := &InstanceGroup{
+		Config: cfg,
+		client: mock,
+	}
+
+	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
+	if err == nil {
+		t.Fatal("expected Init to fail with OPPORTUNISTIC deploy policy on reused group")
+	}
+	if !strings.Contains(err.Error(), "OPPORTUNISTIC") {
+		t.Errorf("expected error to mention OPPORTUNISTIC, got: %v", err)
+	}
+}
+
+func TestInit_GenerateSSHKey_RejectsOpportunisticFreshCreate(t *testing.T) {
+	templatePath := writeTempTemplate(t, testYAMLTemplate)
+	createdGroupID := "created-group-id"
+
+	group := newTestGroupWithTemplate(0, map[string]string{})
+	group.Id = createdGroupID
+	group.FolderId = "test-folder"
+	group.DeployPolicy = &ig.DeployPolicy{
+		Strategy: ig.DeployPolicy_OPPORTUNISTIC,
+	}
+
+	mock := &mockClient{
+		group:              group,
+		listGroupsResponse: &ig.ListInstanceGroupsResponse{},
+		createFromYamlOp:   newCreateOp(createdGroupID),
+	}
+
+	g := &InstanceGroup{
+		Config: Config{
+			FolderID:       "test-folder",
+			TemplateFile:   templatePath,
+			SSHUser:        "ubuntu",
+			GenerateSSHKey: true,
+		},
+		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
+	}
+
+	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
+	if err == nil {
+		t.Fatal("expected Init to fail with OPPORTUNISTIC deploy policy on freshly created group")
+	}
+	if !strings.Contains(err.Error(), "OPPORTUNISTIC") {
+		t.Errorf("expected error to mention OPPORTUNISTIC, got: %v", err)
+	}
+	// Verify rollback was attempted.
+	if mock.lastDeleteReq == nil {
+		t.Error("expected rollback Delete to be called for freshly created group")
+	}
+}
+
+func TestInit_GenerateSSHKey_RollbackOnInjectFailure(t *testing.T) {
+	templatePath := writeTempTemplate(t, testYAMLTemplate)
+	createdGroupID := "created-group-id"
+
+	group := newTestGroupWithTemplate(0, map[string]string{})
+	group.Id = createdGroupID
+	group.FolderId = "test-folder"
+
+	mock := &mockClient{
+		group:              group,
+		listGroupsResponse: &ig.ListInstanceGroupsResponse{},
+		createFromYamlOp:   newCreateOp(createdGroupID),
+		updateErr:          fmt.Errorf("permission denied"),
+	}
+
+	g := &InstanceGroup{
+		Config: Config{
+			FolderID:       "test-folder",
+			TemplateFile:   templatePath,
+			SSHUser:        "ubuntu",
+			GenerateSSHKey: true,
+		},
+		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
+	}
+
+	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
+	if err == nil {
+		t.Fatal("expected Init to fail when SSH key injection fails")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("expected permission denied error, got: %v", err)
+	}
+	// Verify rollback was attempted for the freshly created group.
+	if mock.lastDeleteReq == nil {
+		t.Error("expected rollback Delete to be called for freshly created group")
+	}
+	if mock.lastDeleteReq != nil && mock.lastDeleteReq.InstanceGroupId != createdGroupID {
+		t.Errorf("expected rollback delete for %q, got %q", createdGroupID, mock.lastDeleteReq.InstanceGroupId)
+	}
+}
+
+func TestInit_GenerateSSHKey_AllowsProactiveReuse(t *testing.T) {
+	group := newTestGroupWithTemplate(2, map[string]string{})
+	group.DeployPolicy = &ig.DeployPolicy{
+		Strategy: ig.DeployPolicy_PROACTIVE,
+	}
+	mock := &mockClient{group: group}
+
+	cfg := defaultConfig()
+	cfg.GenerateSSHKey = true
+	g := &InstanceGroup{
+		Config: cfg,
+		client: mock,
+		waitOp: func(_ context.Context, _ *operation.Operation) error { return nil },
+	}
+
+	_, err := g.Init(context.Background(), hclog.NewNullLogger(), provider.Settings{})
+	if err != nil {
+		t.Fatalf("Init should succeed with PROACTIVE deploy policy, got: %v", err)
 	}
 }

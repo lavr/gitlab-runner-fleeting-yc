@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const defaultGroupName = "fleeting-plugin-yandexcloud"
 
@@ -56,6 +59,9 @@ func (c *Config) validate() error {
 	}
 	if c.SSHUser == "" {
 		c.SSHUser = "ubuntu"
+	}
+	if c.GenerateSSHKey && strings.ContainsAny(c.SSHUser, ":\n") {
+		return fmt.Errorf("ssh_user must not contain ':' or newline characters when generate_ssh_key is enabled")
 	}
 	return nil
 }
