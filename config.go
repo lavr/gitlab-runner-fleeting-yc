@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const defaultGroupName = "fleeting-plugin-yandexcloud"
 
@@ -30,6 +33,11 @@ type Config struct {
 
 	// SSHUser is the username for SSH connections. Defaults to "ubuntu".
 	SSHUser string `json:"ssh_user,omitempty"`
+
+	// GenerateSSHKey enables automatic generation of an ephemeral ED25519 SSH key pair.
+	// The public key is injected into the instance group template metadata, and the
+	// private key is returned via ConnectInfo.
+	GenerateSSHKey bool `json:"generate_ssh_key,omitempty"`
 }
 
 // validate checks that required fields are set and applies defaults.
@@ -51,6 +59,9 @@ func (c *Config) validate() error {
 	}
 	if c.SSHUser == "" {
 		c.SSHUser = "ubuntu"
+	}
+	if c.GenerateSSHKey && strings.ContainsAny(c.SSHUser, ":\n") {
+		return fmt.Errorf("ssh_user must not contain ':' or newline characters when generate_ssh_key is enabled")
 	}
 	return nil
 }

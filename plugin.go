@@ -33,6 +33,9 @@ type InstanceGroup struct {
 	settings     provider.Settings
 	createdGroup bool
 
+	sshPrivateKey []byte
+	sshPublicKey  string
+
 	// waitOp waits for an operation to complete. Set by Init; overridable for tests.
 	waitOp func(ctx context.Context, op *operation.Operation) error
 }
@@ -118,6 +121,62 @@ func (g *InstanceGroup) Init(ctx context.Context, logger hclog.Logger, settings 
 		return provider.ProviderInfo{}, validationErr
 	}
 
+	if g.GenerateSSHKey {
+		// With OPPORTUNISTIC deploy policy, YC will never forcefully
+		// recreate running instances.  Outdated VMs keep the old SSH
+		// key and will be reported as "creating" forever — an
+		// unrecoverable state without manual intervention.
+		// This applies to both reused groups (pre-existing VMs) and
+		// freshly created groups with fixed_scale.size > 0 (VMs booted
+		// during creation, before the key is injected).
+		strategy := group.GetDeployPolicy().GetStrategy()
+		if strategy == ig.DeployPolicy_OPPORTUNISTIC {
+			if justCreated {
+				if rbErr := g.rollbackCreatedGroup(ctx); rbErr != nil {
+					return provider.ProviderInfo{}, errors.Join(
+						fmt.Errorf("generate_ssh_key is incompatible with OPPORTUNISTIC deploy policy on instance group %s; "+
+							"instances created before key injection would never be recreated — "+
+							"switch to PROACTIVE deploy policy", g.InstanceGroupID),
+						rbErr,
+					)
+				}
+			}
+			return provider.ProviderInfo{}, fmt.Errorf(
+				"generate_ssh_key is incompatible with OPPORTUNISTIC deploy policy on instance group %s; "+
+					"instances would never be recreated with the new key — "+
+					"switch to PROACTIVE deploy policy or delete the group and let the plugin recreate it",
+				g.InstanceGroupID,
+			)
+		}
+		if !justCreated {
+			g.log.Warn("generate_ssh_key is enabled on a reused instance group; " +
+				"already-running instances will not have the new public key until " +
+				"they are recreated by the deploy policy")
+		}
+		privKey, pubKey, err := generateED25519Key()
+		if err != nil {
+			keygenErr := fmt.Errorf("generating SSH key: %w", err)
+			if justCreated {
+				if rbErr := g.rollbackCreatedGroup(ctx); rbErr != nil {
+					return provider.ProviderInfo{}, errors.Join(keygenErr, rbErr)
+				}
+			}
+			return provider.ProviderInfo{}, keygenErr
+		}
+		g.sshPrivateKey = privKey
+		g.sshPublicKey = pubKey
+		if err := g.injectSSHKey(ctx, group); err != nil {
+			injectErr := fmt.Errorf("injecting SSH key: %w", err)
+			if justCreated {
+				if rbErr := g.rollbackCreatedGroup(ctx); rbErr != nil {
+					return provider.ProviderInfo{}, errors.Join(injectErr, rbErr)
+				}
+			}
+			return provider.ProviderInfo{}, injectErr
+		}
+		g.log.Info("generated and injected ephemeral SSH key")
+	}
+
 	g.log.Info("initialized yandex cloud plugin",
 		"group_name", group.GetName(),
 		"group_id", group.GetId(),
@@ -145,7 +204,16 @@ func (g *InstanceGroup) Update(ctx context.Context, fn func(instance string, sta
 		}
 
 		for _, inst := range resp.GetInstances() {
-			fn(inst.GetId(), mapState(inst.GetStatus()))
+			state := mapState(inst.GetStatus())
+			// When SSH key generation is active, RUNNING_OUTDATED instances
+			// still have the old public key and cannot be connected to with
+			// the new private key. Report them as creating so the fleeting
+			// framework does not attempt to use them until they are recreated
+			// by the deploy policy with the updated template.
+			if g.sshPrivateKey != nil && inst.GetStatus() == ig.ManagedInstance_RUNNING_OUTDATED {
+				state = provider.StateCreating
+			}
+			fn(inst.GetId(), state)
 		}
 
 		pageToken = resp.GetNextPageToken()
@@ -244,6 +312,15 @@ func (g *InstanceGroup) ConnectInfo(ctx context.Context, instance string) (provi
 				info.ConnectorConfig.Username = g.SSHUser
 			}
 
+			if g.sshPrivateKey != nil {
+				info.ConnectorConfig.Key = g.sshPrivateKey
+				info.ConnectorConfig.UseStaticCredentials = true
+				// The generated key is authorized for g.SSHUser; override
+				// any connector_config.username to prevent auth failures
+				// when the two diverge.
+				info.ConnectorConfig.Username = g.SSHUser
+			}
+
 			if externalIP != "" {
 				info.ExternalAddr = externalIP + ":22"
 			}
@@ -271,6 +348,12 @@ func (g *InstanceGroup) Heartbeat(_ context.Context, _ string) error {
 // and DeleteOnShutdown is set, the group is deleted.
 func (g *InstanceGroup) Shutdown(ctx context.Context) error {
 	g.log.Info("shutting down yandex cloud plugin")
+
+	// Zero out private key material before shutdown.
+	for i := range g.sshPrivateKey {
+		g.sshPrivateKey[i] = 0
+	}
+	g.sshPrivateKey = nil
 
 	defer func() {
 		if g.sdk != nil {
