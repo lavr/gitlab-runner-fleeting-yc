@@ -57,9 +57,10 @@ func (g *InstanceGroup) injectSSHKey(ctx context.Context, group *ig.InstanceGrou
 		prefix := g.SSHUser + ":"
 		var kept []string
 		for _, line := range strings.Split(existing, "\n") {
-			if !strings.HasPrefix(line, prefix) {
-				kept = append(kept, line)
+			if line == "" || strings.HasPrefix(line, prefix) {
+				continue
 			}
+			kept = append(kept, line)
 		}
 		kept = append(kept, entry)
 		metadata["ssh-keys"] = strings.Join(kept, "\n")
