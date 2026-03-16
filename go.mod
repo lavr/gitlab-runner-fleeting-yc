@@ -7,7 +7,9 @@ require (
 	github.com/yandex-cloud/go-genproto v0.46.0
 	github.com/yandex-cloud/go-sdk v0.31.0
 	gitlab.com/gitlab-org/fleeting/fleeting v0.0.0-20260312232923-2bec82376cda
+	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.11
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
@@ -29,6 +31,4 @@ require (
 	google.golang.org/genproto v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251213004720-97cd9d5aeac2 // indirect
-	google.golang.org/grpc v1.79.1 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 )

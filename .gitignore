@@ -6,3 +6,5 @@ docs/
 # Binary
 fleeting-plugin-yandexcloud
 dist/
+
+.claude/

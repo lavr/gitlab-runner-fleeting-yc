@@ -1,0 +1,38 @@
+# Example YAML template for creating an Instance Group via the plugin.
+# This file is passed to YC's CreateFromYaml API — the same format as
+# "yc compute instance-group create --file=spec.yaml".
+#
+# The plugin automatically injects the label
+#   fleeting-managed-by: fleeting-plugin-yandexcloud
+# so there is no need to add it here.
+
+name: gitlab-runners
+service_account_id: ajeXXXXXXXXXXXXXXXXX
+instance_template:
+  platform_id: standard-v3
+  resources_spec:
+    cores: 2
+    memory: 4294967296       # 4 GB
+    core_fraction: 100
+  boot_disk_spec:
+    disk_spec:
+      size: 32212254720      # 30 GB
+      type_id: network-ssd
+      image_id: fd8XXXXXXXXXXXXXXXXX   # Ubuntu 22.04 with Docker
+  network_interface_specs:
+    - network_id: enpXXXXXXXXXXXXXXXXX
+      subnet_ids: [e9bXXXXXXXXXXXXXXXXX]
+      primary_v4_address_spec:
+        one_to_one_nat_spec:
+          ip_version: IPV4
+  metadata:
+    ssh-keys: "ubuntu:<your-runner-manager-public-key>"
+scale_policy:
+  fixed_scale:
+    size: 0                  # Fleeting manages the size
+deploy_policy:
+  max_unavailable: 1
+  max_expansion: 1
+allocation_policy:
+  zones:
+    - zone_id: ru-central1-a
