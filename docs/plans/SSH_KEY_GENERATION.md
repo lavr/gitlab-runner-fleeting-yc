@@ -117,11 +117,11 @@ Already a transitive dependency; needs to be promoted to direct.
 
 ### Iteration 3: Documentation and cleanup
 
-- [ ] `README.md` — document `generate_ssh_key` config option
-- [ ] `README.md` — add usage example with `generate_ssh_key: true`
-- [ ] `examples/config.toml` — add commented-out `generate_ssh_key` example
-- [ ] Verify: `go vet ./...` — no issues
-- [ ] Verify: `golangci-lint run ./...` — no lint warnings
+- [x] `README.md` — document `generate_ssh_key` config option
+- [x] `README.md` — add usage example with `generate_ssh_key: true`
+- [x] `examples/config.toml` — add commented-out `generate_ssh_key` example
+- [x] Verify: `go vet ./...` — no issues
+- [x] Verify: `golangci-lint run ./...` — no lint warnings
 
 ## Verification
 

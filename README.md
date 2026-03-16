@@ -16,7 +16,7 @@ This plugin implements the `provider.InstanceGroup` interface from the [Fleeting
 
 - A Yandex Cloud Instance Group with a **FIXED** scale policy (Fleeting manages the size itself), **or** a YAML template file for auto-creation (see [Auto-Create Instance Group](#auto-create-instance-group))
 - Instance template: Ubuntu 22.04 with Docker installed, user `ubuntu` in the `docker` group
-- SSH public key of the runner manager must be set in the instance template metadata
+- SSH public key of the runner manager must be set in the instance template metadata (or use `generate_ssh_key` for automatic key management)
 - A Service Account with the required IAM permissions (see below)
 
 ## IAM Permissions
@@ -58,7 +58,33 @@ sudo mv fleeting-plugin-yandexcloud /usr/local/bin/
 
 ## SSH Key Setup
 
-The plugin **does not** manage SSH keys. You must configure the SSH key in the instance template metadata so that the runner manager can connect to the VMs.
+There are two ways to handle SSH keys:
+
+### Option 1: Automatic key generation (recommended)
+
+Set `generate_ssh_key = true` in `plugin_config`. The plugin will:
+1. Generate an ephemeral ED25519 key pair on startup
+2. Inject the public key into the instance group template metadata (`ssh-keys`)
+3. Provide the private key to the runner via `ConnectInfo()`
+
+No manual key management is needed — keys are fully automated.
+
+```toml
+[runners.autoscaler.plugin_config]
+  folder_id         = "b1gxxxxxxxxxxxxxxxxx"
+  instance_group_id = "cl1xxxxxxxxxxxxxxxxx"
+  ssh_user          = "ubuntu"
+  generate_ssh_key  = true
+
+[runners.autoscaler.connector_config]
+  username          = "ubuntu"
+  use_external_addr = true
+  # No key_path needed — the plugin provides the key automatically
+```
+
+### Option 2: Manual key management
+
+Configure the SSH key in the instance template metadata so that the runner manager can connect to the VMs.
 
 In your instance template metadata, add:
 
@@ -81,6 +107,7 @@ All fields are set under `[runners.autoscaler.plugin_config]` in `config.toml`.
 | `group_name` | string | No | `fleeting-plugin-yandexcloud` | Name used to find or create the instance group (for idempotency) |
 | `key_file` | string | No | — | Path to IAM JSON key file. If empty, uses metadata service |
 | `ssh_user` | string | No | `ubuntu` | Username for SSH connections |
+| `generate_ssh_key` | bool | No | `false` | Auto-generate ephemeral ED25519 SSH key pair and inject into instance template metadata |
 
 \* Exactly one of `instance_group_id` or `template_file` must be provided. They are mutually exclusive.
 

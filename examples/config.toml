@@ -23,6 +23,7 @@ concurrent = 10
       instance_group_id = "cl1xxxxxxxxxxxxxxxxx"
       # key_file = "/etc/gitlab-runner/yc-key.json"  # if not set — metadata auto-detect
       ssh_user          = "ubuntu"
+      # generate_ssh_key = true  # auto-generate ephemeral SSH key pair (no manual key setup needed)
 
     # --- Alternative: auto-create instance group from YAML template ---
     # Instead of instance_group_id, you can point the plugin at a YAML template.
