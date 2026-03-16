@@ -30,6 +30,11 @@ type Config struct {
 
 	// SSHUser is the username for SSH connections. Defaults to "ubuntu".
 	SSHUser string `json:"ssh_user,omitempty"`
+
+	// GenerateSSHKey enables automatic generation of an ephemeral ED25519 SSH key pair.
+	// The public key is injected into the instance group template metadata, and the
+	// private key is returned via ConnectInfo.
+	GenerateSSHKey bool `json:"generate_ssh_key,omitempty"`
 }
 
 // validate checks that required fields are set and applies defaults.

@@ -1,0 +1,44 @@
+# Ralphex Progress Log
+Plan: /Users/lavr/dev/opensource/gitlab-runner-fleeting-yc/docs/plans/SSH_KEY_GENERATION.md
+Branch: SSH_KEY_GENERATION
+Mode: full
+Started: 2026-03-16 10:51:07
+------------------------------------------------------------
+
+starting task execution phase
+
+--- task iteration 1 ---
+[26-03-16 10:51:12] Let me start by reading the plan file to understand the work.
+[26-03-16 10:51:18] TASK ANNOUNCEMENT
+[26-03-16 10:51:18] I'm picking Iteration 1: Core - key generation and injection.
+[26-03-16 10:51:18] This task will implement the core SSH key generation feature:
+[26-03-16 10:51:18]   - Add the golang.org/x/crypto dependency
+[26-03-16 10:51:18]   - Add GenerateSSHKey config field
+[26-03-16 10:51:18]   - Create sshkey.go with ED25519 key generation and metadata injection functions
+[26-03-16 10:51:18]   - Wire it all up in plugin.go (struct fields, Init logic, ConnectInfo logic)
+[26-03-16 10:51:18]   - Verify the build compiles
+[26-03-16 10:51:18] Key files: config.go, sshkey.go (new), plugin.go, go.mod
+[26-03-16 10:51:18] Let me read the existing files first.
+[26-03-16 10:51:24] Let me check the client interface and the provider ConnectInfo type.
+[26-03-16 10:52:07] Good, I have all the context. The `ConnectorConfig` has `Key []byte` and `UseStaticCredentials bool` fields. Now
+[26-03-16 10:52:07] let me check the instance group proto for metadata/template structure.
+[26-03-16 10:52:54] Now I have everything. Let me implement all the pieces.
+[26-03-16 10:52:54] Step 1: Add the dependency.
+[26-03-16 10:53:00] Step 2: Add `GenerateSSHKey` field to config.go.
+[26-03-16 10:53:05] Step 3: Create sshkey.go.
+[26-03-16 10:53:18] Step 4: Add struct fields and wire up Init + ConnectInfo in plugin.go.
+[26-03-16 10:53:25] Now add the SSH key generation logic in Init, right before the final log + return. I'll insert it after the
+[26-03-16 10:53:25] scale policy validation block and before the final log statement.
+[26-03-16 10:53:33] Now add the key return in ConnectInfo, after setting the Username:
+[26-03-16 10:53:39] Now let me verify the build compiles:
+[26-03-16 10:54:00] Build compiles cleanly. Let me also run the existing tests to make sure nothing is broken:
+[26-03-16 10:54:08] All existing tests pass. Now let me update the plan checkboxes and commit.
+[26-03-16 10:54:18] Now let me log progress and commit.
+2026-03-16 10:54:22 - Iteration 1 COMPLETE: Core SSH key generation and injection
+- Added golang.org/x/crypto dependency
+- Added GenerateSSHKey bool field to Config struct
+- Created sshkey.go with generateED25519Key() and injectSSHKey() functions
+- Added sshPrivateKey/sshPublicKey fields to InstanceGroup struct
+- Wired keygen + inject in Init() when GenerateSSHKey is true
+- Return private key in ConnectInfo() when sshPrivateKey is set
+- Build compiles, all existing tests pass

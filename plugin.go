@@ -33,6 +33,9 @@ type InstanceGroup struct {
 	settings     provider.Settings
 	createdGroup bool
 
+	sshPrivateKey []byte
+	sshPublicKey  string
+
 	// waitOp waits for an operation to complete. Set by Init; overridable for tests.
 	waitOp func(ctx context.Context, op *operation.Operation) error
 }
@@ -116,6 +119,19 @@ func (g *InstanceGroup) Init(ctx context.Context, logger hclog.Logger, settings 
 			}
 		}
 		return provider.ProviderInfo{}, validationErr
+	}
+
+	if g.GenerateSSHKey {
+		privKey, pubKey, err := generateED25519Key()
+		if err != nil {
+			return provider.ProviderInfo{}, fmt.Errorf("generating SSH key: %w", err)
+		}
+		g.sshPrivateKey = privKey
+		g.sshPublicKey = pubKey
+		if err := g.injectSSHKey(ctx, group); err != nil {
+			return provider.ProviderInfo{}, fmt.Errorf("injecting SSH key: %w", err)
+		}
+		g.log.Info("generated and injected ephemeral SSH key")
 	}
 
 	g.log.Info("initialized yandex cloud plugin",
@@ -242,6 +258,11 @@ func (g *InstanceGroup) ConnectInfo(ctx context.Context, instance string) (provi
 			info.ConnectorConfig.Protocol = provider.ProtocolSSH
 			if info.ConnectorConfig.Username == "" {
 				info.ConnectorConfig.Username = g.SSHUser
+			}
+
+			if g.sshPrivateKey != nil {
+				info.ConnectorConfig.Key = g.sshPrivateKey
+				info.ConnectorConfig.UseStaticCredentials = true
 			}
 
 			if externalIP != "" {
