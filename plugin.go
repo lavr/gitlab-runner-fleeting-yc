@@ -293,6 +293,12 @@ func (g *InstanceGroup) Heartbeat(_ context.Context, _ string) error {
 func (g *InstanceGroup) Shutdown(ctx context.Context) error {
 	g.log.Info("shutting down yandex cloud plugin")
 
+	// Zero out private key material before shutdown.
+	for i := range g.sshPrivateKey {
+		g.sshPrivateKey[i] = 0
+	}
+	g.sshPrivateKey = nil
+
 	defer func() {
 		if g.sdk != nil {
 			_ = g.sdk.Shutdown(context.Background())

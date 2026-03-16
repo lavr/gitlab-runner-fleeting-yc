@@ -52,7 +52,17 @@ func (g *InstanceGroup) injectSSHKey(ctx context.Context, group *ig.InstanceGrou
 
 	entry := g.SSHUser + ":" + g.sshPublicKey
 	if existing, ok := metadata["ssh-keys"]; ok && existing != "" {
-		metadata["ssh-keys"] = existing + "\n" + entry
+		// Replace any existing entry for the same SSH user to avoid
+		// accumulating stale keys across plugin restarts.
+		prefix := g.SSHUser + ":"
+		var kept []string
+		for _, line := range strings.Split(existing, "\n") {
+			if !strings.HasPrefix(line, prefix) {
+				kept = append(kept, line)
+			}
+		}
+		kept = append(kept, entry)
+		metadata["ssh-keys"] = strings.Join(kept, "\n")
 	} else {
 		metadata["ssh-keys"] = entry
 	}
